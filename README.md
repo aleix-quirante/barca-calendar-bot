@@ -4,8 +4,9 @@ Un bot automatizado en Python que descarga el calendario oficial de partidos del
 
 ## 🌟 Características
 
-- **Sincronización Automática:** Descarga el archivo `.ics` oficial del FC Barcelona y añade/actualiza los eventos en Google Calendar.
-- **Automatización Diaria:** Utiliza GitHub Actions para ejecutarse todos los días a las 09:00 AM (UTC) sin intervención manual.
+- **Sincronización Automática:** Descarga el archivo `.ics` del FC Barcelona y añade/actualiza los eventos en Google Calendar.
+- **Predicción de Victoria:** Calcula e incluye automáticamente en la descripción del evento el **porcentaje de probabilidad de victoria** del Barça en base al sistema matemático oficial de [ClubElo](http://clubelo.com).
+- **Automatización Constante:** Utiliza GitHub Actions para ejecutarse 3 veces al día (Mañana a las 09:00, Mediodía a las 15:00 y Tarde/Noche a las 21:00) sin intervención manual.
 - **Contribuciones en GitHub:** Genera un commit automático en el archivo `log_partidos.md` tras cada ejecución exitosa, manteniendo activa tu gráfica de contribuciones.
 - **Fácil Despliegue:** Preparado para funcionar directamente en GitHub Actions usando Secrets.
 
@@ -54,7 +55,7 @@ Para que el bot se ejecute automáticamente todos los días en la nube:
 2. Abre el archivo `token.json` y copia todo su contenido.
 3. Ve a tu repositorio en GitHub > **Settings** > **Secrets and variables** > **Actions**.
 4. Crea un nuevo secreto llamado `GOOGLE_TOKEN_JSON` y pega el contenido de `token.json` como valor.
-5. ¡Listo! El bot se ejecutará automáticamente según el cronograma definido en `.github/workflows/run_bot.yml` (todos los días a las 09:00 UTC). También puedes ejecutarlo manualmente desde la pestaña **Actions** usando el botón "Run workflow".
+5. ¡Listo! El bot se ejecutará automáticamente según el cronograma definido en `.github/workflows/run_bot.yml` (todos los días por la mañana, mediodía y noche). También puedes ejecutarlo manualmente desde la pestaña **Actions** usando el botón "Run workflow".
 
 ## 📁 Estructura del Proyecto
 
