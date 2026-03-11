@@ -2,8 +2,8 @@ name: Sincronizador Cule Diario
 
 on:
   schedule:
-    # Se ejecuta todos los días a las 09:00 AM UTC
-    - cron: '0 9 * * *'
+    # Se ejecuta a las 08:00, 14:00 y 20:00 UTC (Mañana, Mediodía y Tarde/Noche)
+    - cron: '0 8,14,20 * * *'
   workflow_dispatch: # Permite darle al botón de "Play" manual
 
 jobs:
