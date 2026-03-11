@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+
+# Credenciales y secretos (¡NUNCA SUBIR A GITHUB!)
+credentials.json
+token.json
+client_secret_*.json
+.env
+
+# Archivos de log
+*.log
