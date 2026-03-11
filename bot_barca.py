@@ -1,6 +1,8 @@
 import os
 import requests
 import json
+import csv
+from io import StringIO
 from datetime import datetime, timezone
 from icalendar import Calendar
 
@@ -11,6 +13,48 @@ from google.auth.transport.requests import Request
 # URL del calendario del Barça (formato .ics alternativo)
 URL_CALENDARIO = "https://ics.fixtur.es/v2/fc-barcelona.ics"
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+
+
+def obtener_probabilidades_barca():
+    """Obtiene las probabilidades de victoria del Barça para los próximos partidos usando ClubElo (Sin API Key)"""
+    print("Consultando probabilidades en ClubElo...")
+    url = "http://api.clubelo.com/Fixtures"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Error descargando ClubElo: {e}")
+        return {}
+
+    probabilidades = {}
+    csv_reader = csv.DictReader(StringIO(response.text))
+
+    for row in csv_reader:
+        home = row.get("Home", "")
+        away = row.get("Away", "")
+        date = row.get("Date", "")
+
+        if home == "Barcelona" or away == "Barcelona":
+            try:
+                prob_home_win = sum(
+                    float(row[col])
+                    for col in ["GD=1", "GD=2", "GD=3", "GD=4", "GD=5", "GD>5"]
+                )
+                prob_away_win = sum(
+                    float(row[col])
+                    for col in ["GD=-1", "GD=-2", "GD=-3", "GD=-4", "GD=-5", "GD<-5"]
+                )
+
+                if home == "Barcelona":
+                    prob_barca = prob_home_win
+                else:
+                    prob_barca = prob_away_win
+
+                probabilidades[date] = round(prob_barca * 100, 1)
+            except Exception as e:
+                continue
+
+    return probabilidades
 
 
 def obtener_eventos_ics():
@@ -73,7 +117,7 @@ def obtener_servicio_google():
     return build("calendar", "v3", credentials=creds)
 
 
-def sincronizar_eventos(servicio, eventos):
+def sincronizar_eventos(servicio, eventos, probabilidades):
     """Sincroniza los eventos extraídos a Google Calendar"""
     calendar_id = "primary"  # O puedes poner el ID de un calendario específico
 
@@ -83,9 +127,17 @@ def sincronizar_eventos(servicio, eventos):
         # asumiendo que el datetime viene en un formato correcto o necesita .isoformat()
         try:
             # Los dtstart de icalendar pueden ser 'date' o 'datetime'
-            start_iso = partido["start"].isoformat()
-            if type(partido["start"]) is not datetime:
-                start_iso = partido["start"].isoformat()  # Si es tipo date
+            start_date_obj = partido["start"]
+            start_iso = start_date_obj.isoformat()
+            if type(start_date_obj) is not datetime:
+                start_iso = start_date_obj.isoformat()  # Si es tipo date
+
+            # Obtener el día del partido en formato YYYY-MM-DD para buscar la probabilidad
+            fecha_str = (
+                start_date_obj.strftime("%Y-%m-%d")
+                if hasattr(start_date_obj, "strftime")
+                else str(start_date_obj)[:10]
+            )
 
             end_iso = partido["end"].isoformat() if partido["end"] else start_iso
 
@@ -95,10 +147,16 @@ def sincronizar_eventos(servicio, eventos):
             )
             end_body = {"dateTime": end_iso} if "T" in end_iso else {"date": end_iso}
 
+            descripcion = "Sincronizado automáticamente (Barça Bot)"
+
+            if fecha_str in probabilidades:
+                prob = probabilidades[fecha_str]
+                descripcion += f"\n\n📈 Probabilidad de victoria del Barça: {prob}% (según ClubElo)"
+
             evento_cuerpo = {
                 "summary": partido["summary"],
                 "location": partido["location"],
-                "description": "Sincronizado automáticamente (Barça Bot)",
+                "description": descripcion,
                 "start": start_body,
                 "end": end_body,
                 "iCalUID": partido["uid"],
@@ -132,12 +190,15 @@ def main():
         # 1. Obtener eventos de FC Barcelona
         eventos = obtener_eventos_ics()
 
-        # 2. Conectar a Google
+        # 2. Obtener probabilidades
+        probabilidades = obtener_probabilidades_barca()
+
+        # 3. Conectar a Google
         servicio = obtener_servicio_google()
 
-        # 3. Sincronizar
+        # 4. Sincronizar
         if eventos and servicio:
-            sincronizar_eventos(servicio, eventos)
+            sincronizar_eventos(servicio, eventos, probabilidades)
 
     except Exception as e:
         print(f"❌ Error durante el proceso: {e}")
