@@ -3,7 +3,7 @@ import requests
 import json
 import csv
 from io import StringIO
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from icalendar import Calendar
 
 from google.oauth2.credentials import Credentials
@@ -74,10 +74,27 @@ def obtener_eventos_ics():
         if component.name == "VEVENT":
             # Extraer detalles del evento
             summary = str(component.get("summary"))
-            dtstart = component.get("dtstart").dt
+            dtstart_prop = component.get("dtstart")
+            if not dtstart_prop:
+                continue
+
+            dtstart = dtstart_prop.dt
+
+            # Omitir eventos con horario no confirmado (todo el día o 'TBC'/'TBD')
+            if (
+                type(dtstart) is not datetime
+                or "TBC" in summary.upper()
+                or "TBD" in summary.upper()
+            ):
+                continue
+
             dtend = component.get("dtend").dt if component.get("dtend") else None
             location = str(component.get("location", "Por definir"))
             uid = str(component.get("uid"))
+
+            # Añadir emoji de pelota si no lo tiene
+            if not summary.startswith("⚽"):
+                summary = "⚽ " + summary.strip()
 
             # Solo guardamos eventos futuros o recientes (opcional)
             eventos.append(
@@ -90,7 +107,7 @@ def obtener_eventos_ics():
                 }
             )
 
-    print(f"Se encontraron {len(eventos)} partidos en el ICS.")
+    print(f"Se encontraron {len(eventos)} partidos confirmados en el ICS.")
     return eventos
 
 
@@ -117,9 +134,53 @@ def obtener_servicio_google():
     return build("calendar", "v3", credentials=creds)
 
 
+def limpiar_eventos_viejos(servicio, calendar_id):
+    """Busca y elimina eventos del bot que tengan más de dos semanas de antigüedad."""
+    print("Buscando eventos antiguos para eliminar...")
+    hace_dos_semanas = (datetime.now(timezone.utc) - timedelta(weeks=2)).isoformat()
+
+    try:
+        # Paginamos sobre los eventos.
+        page_token = None
+        while True:
+            events_result = (
+                servicio.events()
+                .list(
+                    calendarId=calendar_id,
+                    timeMax=hace_dos_semanas,
+                    q="Barça Bot",  # Filtro básico para eventos del bot
+                    maxResults=250,
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+
+            events = events_result.get("items", [])
+
+            for event in events:
+                if "Barça Bot" in event.get("description", ""):
+                    print(
+                        f"Eliminando evento antiguo: {event.get('summary')} ({event.get('start', {}).get('date', event.get('start', {}).get('dateTime'))})"
+                    )
+                    servicio.events().delete(
+                        calendarId=calendar_id, eventId=event["id"]
+                    ).execute()
+
+            page_token = events_result.get("nextPageToken")
+            if not page_token:
+                break
+
+        print("✅ Limpieza de eventos antiguos completada.")
+    except Exception as e:
+        print(f"Error al limpiar eventos viejos: {e}")
+
+
 def sincronizar_eventos(servicio, eventos, probabilidades):
     """Sincroniza los eventos extraídos a Google Calendar"""
     calendar_id = "primary"  # O puedes poner el ID de un calendario específico
+
+    # Primero limpiamos los eventos que tienen más de dos semanas
+    limpiar_eventos_viejos(servicio, calendar_id)
 
     print("Sincronizando con Google Calendar...")
     for partido in eventos:
