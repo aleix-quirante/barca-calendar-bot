@@ -1,7 +1,7 @@
 # Capa 3 - Plan de Implementación
 
 **Proyecto:** FC Barcelona Calendar Bot  
-**Versión:** 3.0.0  
+**Versión:** 3.1.0  
 **Fecha:** 2026-04-04  
 **Arquitecto:** Roo (Perfil ARQUITECTO)
 
@@ -24,11 +24,11 @@ Este plan describe las fases de implementación para la refactorización del bot
 | Tarea | Descripción | Entregable |
 |-------|-------------|------------|
 | **0.1** | Actualizar el workflow de GitHub Actions a Python 3.12 | `.github/workflows/run_bot.yml` modificado |
-| **0.2** | Crear `pyproject.toml` con dependencias modernas (Pydantic v2.10+, httpx, pydantic-settings) | `pyproject.toml` |
+| **0.2** | Crear `pyproject.toml` con dependencias modernas (Pydantic v2.10+, httpx, pydantic-settings, openai) | `pyproject.toml` |
 | **0.3** | Configurar entorno de desarrollo local con `uv` o `venv` | Script de activación |
 | **0.4** | Estructurar el directorio `src/` según el esquema de módulos | Directorios `src/calendar_cleaner/`, `src/win_probability_fix/`, `src/sports_summary_agent/` |
 | **0.5** | Configurar logging estructurado (JSON en producción, legible en desarrollo) | `src/shared/logging_config.py` |
-| **0.6** | Crear configuración centralizada con `pydantic-settings` | `src/shared/config.py` |
+| **0.6** | Crear configuración centralizada con `pydantic-settings` incluyendo `OLLAMA_BASE_URL` | `src/shared/config.py` |
 
 ### Fase 1: Módulo CalendarCleaner (Semana 2)
 **Objetivo:** Refactorizar la función `limpiar_eventos_viejos` en un módulo independiente con validación Pydantic y purgado optimizado.
@@ -56,17 +56,18 @@ Este plan describe las fases de implementación para la refactorización del bot
 | **2.7** | Ejecutar pruebas de integración con la API real (modo monitorizado) | Reporte de latencia y tasa de éxito |
 
 ### Fase 3: Módulo SportsSummaryAgent (Semana 4)
-**Objetivo:** Desarrollar el agente generador de resúmenes post‑partido usando DeepSeek API con control de costes.
+**Objetivo:** Desarrollar el agente generador de resúmenes post‑partido usando inferencia local gratuita (nodo Edge Mac Mini) mediante API OpenAI‑compatible (Ollama/LocalAI).
 
 | Tarea | Descripción | Entregable |
 |-------|-------------|------------|
 | **3.1** | Investigar y seleccionar fuente de resultados de partidos (Football‑Data.org, ESPN scraping, etc.) | Documento de decisión |
-| **3.2** | Implementar cliente para la API de DeepSeek con manejo de errores y límite de tokens | `src/sports_summary_agent/deepseek_client.py` |
-| **3.3** | Diseñar prompt optimizado que genere exactamente 3 bullet points en español | `src/sports_summary_agent/prompts.py` |
-| **3.4** | Crear el orquestador que detecte partidos finalizados, obtenga el resultado, llame a la API y actualice el evento | `src/sports_summary_agent/summarizer.py` |
-| **3.5** | Añadir sistema de cost‑awareness (máximo 2 llamadas por partido, cacheo permanente) | `src/sports_summary_agent/cost_optimizer.py` |
-| **3.6** | Escribir tests unitarios con respuestas simuladas de DeepSeek | `tests/sports_summary_agent/test_summarizer.py` |
+| **3.2** | Implementar cliente OpenAI‑compatible que use `OLLAMA_BASE_URL` variable de entorno para `base_url` | `src/sports_summary_agent/openai_client.py` |
+| **3.3** | Diseñar prompt optimizado que genere exactamente 3 bullet points en español con contexto de campeonato | `src/sports_summary_agent/prompts.py` |
+| **3.4** | Crear el orquestador que detecte partidos finalizados, obtenga resultado, llame a la API y actualice evento | `src/sports_summary_agent/summarizer.py` |
+| **3.5** | Implementar sistema de caché permanente para evitar regenerar resúmenes ya creados | `src/sports_summary_agent/cache.py` |
+| **3.6** | Escribir tests unitarios con respuestas simuladas de API OpenAI‑compatible | `tests/sports_summary_agent/test_summarizer.py` |
 | **3.7** | Integrar el agente en el flujo principal como opción configurable (variable `SUMMARY_ENABLED`) | Modificación en `bot_barca.py` |
+| **3.8** | Configurar pruebas de conexión con nodo Edge local (`localhost:11434`) y túnel Cloudflare | Script de validación de conectividad |
 
 ### Fase 4: Integración y Migración (Semana 5)
 **Objetivo:** Unificar los tres módulos en una arquitectura coherente y migrar el código legacy.
@@ -86,8 +87,8 @@ Este plan describe las fases de implementación para la refactorización del bot
 | Tarea | Descripción | Entregable |
 |-------|-------------|------------|
 | **5.1** | Desplegar en entorno de producción (rampa gradual del 10% al 100% de las ejecuciones) | Plan de despliegue |
-| **5.2** | Configurar alertas básicas (Slack/Email) para fallos críticos (ej. Google Auth, API DeepSeek) | Script de alertas |
-| **5.3** | Monitorizar costes de DeepSeek API y ajustar límites si es necesario | Dashboard de costes |
+| **5.2** | Configurar alertas básicas (Slack/Email) para fallos críticos (ej. Google Auth, inferencia Edge) | Script de alertas |
+| **5.3** | Monitorizar disponibilidad del nodo Edge y latencia de inferencia | Dashboard de métricas |
 | **5.4** | Recoger métricas de rendimiento (tiempo de ejecución por módulo, tasa de éxito de APIs) | Métricas en logs |
 | **5.5** | Realizar una revisión post‑implementación y ajustar parámetros (TTL de caché, días de retención) | Informe de optimización |
 | **5.6** | Actualizar la documentación de usuario (`README.md`) con las nuevas características | `README.md` actualizado |
@@ -108,21 +109,27 @@ graph TD
     G[Obtener eventos ICS] --> H[Sincronizar con Google Calendar]
     H --> I[SportsSummaryAgent.detect_finished_matches]
     I --> J{¿Partido finalizado?}
-    J -->|Sí| K[Generar resumen con DeepSeek]
-    J -->|No| L[Saltar]
-    K --> M[Actualizar descripción del evento]
-    L --> N[Registrar ejecución en log]
-    N --> O[Fin]
+    J -->|Sí| K[Obtener resultado del partido]
+    K --> L{¿Resumen ya existe en caché?}
+    L -->|Sí| M[Usar resumen cachead]
+    L -->|No| N[Generar resumen con API OpenAI‑compatible]
+    N --> O[Usar OLLAMA_BASE_URL: localhost o Cloudflare]
+    O --> P[Actualizar descripción del evento]
+    M --> P
+    J -->|No| Q[Saltar]
+    P --> R[Registrar ejecución en log]
+    Q --> R
+    R --> S[Fin]
 ```
 
 ---
 
 ## 4. CRITERIOS DE ÉXITO POR FASE
 
-- **Fase 0:** El bot se ejecuta sin errores en Python 3.12 con las nuevas dependencias.
+- **Fase 0:** El bot se ejecuta sin errores en Python 3.12 con las nuevas dependencias (incluyendo `openai`).
 - **Fase 1:** CalendarCleaner elimina eventos antiguos correctamente, sin afectar a eventos futuros o de otros calendarios.
 - **Fase 2:** WinProbabilityFix mantiene una tasa de éxito >95% incluso con caídas simuladas de ClubElo.
-- **Fase 3:** SportsSummaryAgent genera resúmenes coherentes y no supera el presupuesto de coste establecido.
+- **Fase 3:** SportsSummaryAgent genera resúmenes coherentes con coste cero utilizando el nodo Edge Mac Mini.
 - **Fase 4:** El bot refactorizado pasa todas las pruebas de regresión y el flujo de GitHub Actions sigue pintando de verde.
 - **Fase 5:** El bot opera en producción con cero incidencias críticas durante una semana.
 
@@ -133,10 +140,11 @@ graph TD
 | Riesgo | Impacto | Probabilidad | Mitigación |
 |--------|---------|--------------|------------|
 | **Cambios en la API de ClubElo** | Alto | Media | Usar validación Pydantic + columnas dinámicas; mantener fallback a caché. |
-| **Costes imprevistos de DeepSeek API** | Medio | Baja | Implementar dry‑run y límite estricto de tokens; monitorizar diariamente. |
+| **Indisponibilidad del nodo Edge** | Medio | Media | Implementar degradación elegante: si la inferencia falla, omitir resúmenes sin romper el flujo. |
 | **Incompatibilidad con Python 3.12** | Bajo | Baja | Ejecutar tests en CI con múltiples versiones de Python (3.9, 3.12). |
 | **Pérdida de eventos durante la migración** | Alto | Baja | Realizar copia de seguridad del calendario antes del despliegue; usar modo dry‑run en CalendarCleaner. |
 | **Degradación del rendimiento** | Medio | Media | Perfilar cada módulo y optimizar llamadas a API (batch, caché). |
+| **Problemas de conectividad con túnel Cloudflare** | Medio | Baja | Usar timeouts cortos y reintentos; permitir fallback a `localhost` en desarrollo. |
 
 ---
 

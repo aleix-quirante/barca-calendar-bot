@@ -221,7 +221,7 @@ graph TD
 - **Resultado:** ✅ **NO SE DETECTARON FUGAS**
 - **Análisis:** Se revisaron los archivos `cleaner.py` y `models.py` en busca de patrones que pudieran exponer credenciales (tokens, API keys, contraseñas). No se encontraron cadenas sensibles hardcodeadas.
 - **Logs:** Los logs del módulo solo incluyen identificadores de calendario y metadatos de eventos, nunca credenciales.
-- **Configuración:** Las claves de API (DeepSeek, Google) se gestionan a través de `src/shared/config.py` con variables de entorno, no se exponen en el código del cleaner.
+- **Configuración:** Las claves de API (Ollama/LocalAI, Google) se gestionan a través de `src/shared/config.py` con variables de entorno, no se exponen en el código del cleaner.
 
 ### 7.2 Cumplimiento de Pydantic v2.10
 - **Resultado:** ✅ **CUMPLE TOTALMENTE**

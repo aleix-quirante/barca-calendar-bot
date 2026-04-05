@@ -1,7 +1,7 @@
 # Capa 3 - Requisitos Técnicos de Módulos
 
 **Proyecto:** FC Barcelona Calendar Bot  
-**Versión:** 3.0.0  
+**Versión:** 3.1.0  
 **Fecha:** 2026-04-04  
 **Arquitecto:** Roo (Perfil ARQUITECTO)
 
@@ -14,7 +14,7 @@ Este documento define los requisitos técnicos para la refactorización del bot 
 **Objetivos principales:**
 - **Optimización de rendimiento:** Reducir la carga en Google Calendar mediante purgado inteligente de eventos pasados.
 - **Resiliencia operativa:** Implementar degradación elegante en la obtención de probabilidades de victoria.
-- **Valor añadido:** Generar resúmenes automáticos post‑partido usando IA de bajo coste (DeepSeek API).
+- **Valor añadido:** Generar resúmenes automáticos post‑partido usando inferencia local gratuita (nodo Edge Mac Mini) mediante API OpenAI‑compatible.
 
 ---
 
@@ -36,6 +36,7 @@ google-auth-oauthlib = "^1.2"
 icalendar = "^5.0"
 httpx = "^0.27"  # Para clientes HTTP asíncronos opcionales
 pydantic-settings = "^2.5"  # Para gestión de configuración
+openai = "^1.0"  # Cliente oficial para APIs OpenAI‑compatible (Ollama/LocalAI)
 ```
 
 ### 2.3 Estructura de Módulos
@@ -54,7 +55,7 @@ src/
 │   └── gracefull_degradation.py
 ├── sports_summary_agent/      # Módulo SportsSummaryAgent
 │   ├── __init__.py
-│   ├── deepseek_client.py
+│   ├── openai_client.py       # Cliente OpenAI‑compatible (configurable via OLLAMA_BASE_URL)
 │   ├── summarizer.py
 │   ├── models.py
 │   └── cost_optimizer.py
@@ -152,25 +153,28 @@ class WinProbabilityResponse(BaseModel):
 ## 5. MÓDULO 3: SPORTS SUMMARY AGENT
 
 ### 5.1 Propósito
-Generar automáticamente 3 bullet points de resumen post‑partido utilizando la API de DeepSeek (modelo de lenguaje) para añadir valor a los eventos del calendario, minimizando costes.
+Generar automáticamente 3 bullet points de resumen post‑partido utilizando inferencia local gratuita (nodo Edge Mac Mini con Ollama/LocalAI) mediante la librería oficial de OpenAI, añadiendo valor a los eventos del calendario con coste cero.
 
 ### 5.2 Requisitos Funcionales
 - **RF‑SS‑01:** Detectar partidos que hayan finalizado (fecha de fin anterior a la actual).
 - **RF‑SS‑02:** Obtener el resultado del partido desde una fuente confiable (por ejemplo, API de Football‑Data.org o scraping de ESPN).
-- **RF‑SS‑03:** Enviar el resultado a la API de DeepSeek (endpoint `/chat/completions`) con un prompt optimizado para generar **exactamente 3 bullet points** en español.
-- **RF‑SS‑04:** Almacenar el resumen generado en la descripción del evento de Google Calendar (actualización incremental).
-- **RF‑SS‑05:** Implementar un sistema de cost‑awareness: limitar llamadas a la API a un máximo de 2 por partido (una vez generado, se cachea indefinidamente).
-- **RF‑SS‑06:** Soporte para modo “dry‑run” donde se simula la llamada a la API para validar el prompt sin incurrir en costes.
+- **RF‑SS‑03:** Utilizar la librería oficial `openai` con `base_url` extraído de la variable de entorno `OLLAMA_BASE_URL` para apuntar a localhost (desarrollo) o a un túnel de Cloudflare (producción).
+- **RF‑SS‑04:** Enviar el resultado a la API OpenAI‑compatible (endpoint `/v1/chat/completions`) con un prompt optimizado para generar **exactamente 3 bullet points** en español, incluyendo contexto del campeonato.
+- **RF‑SS‑05:** Almacenar el resumen generado en la descripción del evento de Google Calendar (actualización incremental).
+- **RF‑SS‑06:** Implementar un sistema de caché permanente: una vez generado un resumen, no se vuelve a llamar a la API para el mismo partido.
+- **RF‑SS‑07:** Soporte para modo "dry‑run" donde se simula la llamada a la API para validar el prompt sin realizar inferencia real.
 
 ### 5.3 Requisitos No Funcionales
-- **RNF‑SS‑01:** Coste máximo por partido: < $0.001 (asumiendo tarifas de DeepSeek).
-- **RNF‑SS‑02:** Tiempo de generación: < 10 segundos (incluyendo llamada a la API).
+- **RNF‑SS‑01:** Coste por partido: $0.00 (inferencia local gratuita en nodo Edge).
+- **RNF‑SS‑02:** Tiempo de generación: < 15 segundos (incluyendo llamada a la API local/remota).
 - **RNF‑SS‑03:** Los bullet points deben ser concisos (máximo 20 palabras cada uno), objetivos y centrados en aspectos tácticos, jugadores destacados y consecuencias en la clasificación.
+- **RNF‑SS‑04:** Resiliencia de conexión: el agente debe funcionar tanto con `localhost:11434` (Ollama local) como con un túnel Cloudflare remoto, configurable mediante variable de entorno.
 
 ### 5.4 Modelos de Datos (Pydantic v2)
 ```python
-from pydantic import BaseModel, Field, HttpUrl
-from enum import Enum
+from pydantic import BaseModel, Field
+from datetime import datetime, date
+from typing import Literal
 
 class MatchResult(BaseModel):
     home_team: str
@@ -178,18 +182,22 @@ class MatchResult(BaseModel):
     home_score: int
     away_score: int
     match_date: date
+    competition: str = Field(default="La Liga", description="Nombre del campeonato/torneo")
 
-class DeepSeekRequest(BaseModel):
-    model: str = Field(default="deepseek-chat")
-    messages: list[dict[str, str]]
-    max_tokens: int = Field(default=150)
-    temperature: float = Field(default=0.7, ge=0.0, le=1.0)
-
-class SportsSummary(BaseModel):
+class MatchSummary(BaseModel):
+    """Resumen de partido generado por IA con exactamente 3 bullet points y contexto del campeonato."""
     match_id: str
-    bullet_points: list[str] = Field(min_items=3, max_items=3)
+    bullet_points: list[str] = Field(
+        min_items=3,
+        max_items=3,
+        description="Tres puntos clave del partido, cada uno como string separado"
+    )
+    championship_context: str = Field(
+        description="Contexto del campeonato: posición en la tabla, implicaciones, etc."
+    )
     generated_at: datetime
-    cost_estimate_usd: float = Field(ge=0.0)
+    model_used: str = Field(description="Modelo de lenguaje utilizado para la generación")
+    inference_source: Literal["local_ollama", "cloudflare_tunnel", "dry_run"]
 ```
 
 ---
@@ -206,13 +214,15 @@ class SportsSummary(BaseModel):
 Todos los módulos compartirán una configuración centralizada mediante `pydantic-settings`:
 
 ```python
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class BotSettings(BaseSettings):
     google_calendar_id: str = "primary"
     clubelo_timeout: int = 10
-    deepseek_api_key: str = ""
+    ollama_base_url: str = "http://localhost:11434/v1"  # Para inferencia local
+    ollama_api_key: str = "ollama"  # Clave por defecto para Ollama (no requerida realmente)
     summary_enabled: bool = True
+    summary_model: str = "llama3.2:3b"  # Modelo por defecto para Ollama/LocalAI
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 ```
@@ -225,7 +235,7 @@ class BotSettings(BaseSettings):
 - [ ] Todas las entradas y salidas de funciones públicas están validadas con modelos Pydantic v2.10+.
 - [ ] El bot funciona correctamente con Python 3.12 (verificado con `python -m pytest`).
 - [ ] El flujo de degradación elegante en WinProbabilityFix permite que el bot continúe aunque ClubElo esté caído.
-- [ ] SportsSummaryAgent no supera un coste de $0.01 por día en uso normal.
+- [ ] SportsSummaryAgent genera resúmenes con coste cero utilizando el nodo Edge Mac Mini.
 - [ ] CalendarCleaner reduce el número de eventos en el calendario a solo los futuros + los de los últimos 7 días.
 
 ---
@@ -234,7 +244,8 @@ class BotSettings(BaseSettings):
 
 - **Migración progresiva:** Los nuevos módulos pueden coexistir con el código legacy mientras se prueba su funcionamiento.
 - **Logging estructurado:** Usar `structlog` o `logging` con formato JSON para facilitar el monitoreo en GitHub Actions.
-- **Tests:** Cada módulo debe incluir tests unitarios (cobertura >80%) y tests de integración con las APIs reales (modo “dry‑run”).
+- **Tests:** Cada módulo debe incluir tests unitarios (cobertura >80%) y tests de integración con las APIs reales (modo "dry‑run").
+- **Infraestructura Edge:** El nodo Mac Mini ejecutará Ollama/LocalAI expuesto via `localhost:11434` en desarrollo y via túnel Cloudflare en producción. La variable `OLLAMA_BASE_URL` permitirá cambiar entre ambos entornos sin modificar código.
 
 ---
 

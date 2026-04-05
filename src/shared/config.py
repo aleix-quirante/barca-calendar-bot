@@ -59,22 +59,26 @@ class BotSettings(BaseSettings):
         description="Si es True, el bot continuará aunque ClubElo falle (usando caché o valores por defecto).",
     )
 
-    # DeepSeek API (resúmenes automáticos)
-    deepseek_api_key: str = Field(
-        default="",
-        description="API Key para DeepSeek (si está vacía, el módulo de resúmenes se desactiva).",
+    # Ollama/LocalAI API (resúmenes automáticos - OpenAI‑compatible)
+    ollama_base_url: str = Field(
+        default="http://localhost:11434/v1",
+        description="URL base para la API OpenAI‑compatible (Ollama/LocalAI). Ejemplos: 'http://localhost:11434/v1' para local, 'https://your-tunnel.cloudflare.com/v1' para producción.",
     )
-    deepseek_model: str = Field(
-        default="deepseek-chat",
-        description="Modelo de DeepSeek a utilizar.",
+    ollama_api_key: str = Field(
+        default="ollama",
+        description="API Key para Ollama/LocalAI (por defecto 'ollama', puede dejarse vacía para local).",
     )
-    deepseek_max_tokens: int = Field(
-        default=150,
+    summary_model: str = Field(
+        default="llama3.2:3b",
+        description="Modelo de lenguaje a utilizar para generación de resúmenes.",
+    )
+    summary_max_tokens: int = Field(
+        default=300,
         ge=50,
-        le=500,
+        le=1000,
         description="Máximo de tokens para la generación de resúmenes.",
     )
-    deepseek_temperature: float = Field(
+    summary_temperature: float = Field(
         default=0.7,
         ge=0.0,
         le=1.0,
@@ -84,10 +88,11 @@ class BotSettings(BaseSettings):
         default=True,
         description="Activar/desactivar la generación de resúmenes post‑partido.",
     )
-    summary_cost_limit_usd: float = Field(
-        default=0.01,
-        ge=0.0,
-        description="Límite diario de coste en USD para llamadas a DeepSeek.",
+    summary_timeout: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+        description="Timeout en segundos para las peticiones a la API de inferencia.",
     )
 
     # CalendarCleaner
@@ -126,19 +131,23 @@ class BotSettings(BaseSettings):
         description="Frecuencia de ejecución en minutos (usado solo para logging).",
     )
 
-    @field_validator("deepseek_api_key")
+    @field_validator("ollama_base_url")
     @classmethod
-    def validate_deepseek_key(cls, v: str) -> str:
-        """Si la clave está vacía, desactivamos el módulo de resúmenes."""
-        if v == "":
-            # No es un error, simplemente indicamos que el módulo estará desactivado.
-            pass
+    def validate_ollama_base_url(cls, v: str) -> str:
+        """Asegura que la URL base termine con /v1 si es necesario."""
+        v = v.strip()
+        if v and not v.endswith("/v1"):
+            # Añadir /v1 si no está presente (compatibilidad con OpenAI)
+            if v.endswith("/"):
+                v = v + "v1"
+            else:
+                v = v + "/v1"
         return v
 
     @property
     def is_summary_enabled(self) -> bool:
         """Determina si el módulo de resúmenes está activo."""
-        return self.summary_enabled and bool(self.deepseek_api_key)
+        return self.summary_enabled and bool(self.ollama_base_url)
 
 
 # Instancia global de configuración
