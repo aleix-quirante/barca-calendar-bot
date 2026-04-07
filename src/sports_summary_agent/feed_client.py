@@ -43,10 +43,11 @@ class FeedClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.ssl_verify = ssl_verify
         self._http_client = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
-            verify=False,
+            verify=self.ssl_verify,
         )
 
     def fetch_match_results(self) -> list[MatchResult]:
