@@ -43,7 +43,7 @@ class BotSettings(BaseSettings):
 
     # RSS feed for match results (SportsSummaryAgent)
     rss_feed_url: HttpUrl = Field(
-        default="https://example.com/barca-matches.rss",
+        default="https://www.mundodeportivo.com/mvc/feed/rss/futbol/fc-barcelona",
         description="URL del feed RSS con los resultados de partidos del FC Barcelona.",
     )
 
