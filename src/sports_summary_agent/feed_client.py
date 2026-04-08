@@ -1,15 +1,14 @@
 """
-RSS feed client for fetching match results.
+RSS feed client for fetching news articles.
 """
 
-import re
 import time
 from datetime import date
 
 import feedparser
 import httpx
 
-from src.sports_summary_agent.models import MatchResult
+from src.sports_summary_agent.models import NewsItem
 
 
 class FeedClientError(Exception):
@@ -19,7 +18,7 @@ class FeedClientError(Exception):
 
 
 class FeedClient:
-    """Client for fetching and parsing match results from an RSS feed."""
+    """Client for fetching and parsing news articles from an RSS feed."""
 
     def __init__(
         self,
@@ -28,6 +27,7 @@ class FeedClient:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         ssl_verify: bool = True,
+        max_items: int = 10,
     ):
         """
         Initialize the feed client.
@@ -38,12 +38,14 @@ class FeedClient:
             max_retries: Maximum number of retries for transient failures.
             retry_delay: Delay between retries in seconds (will be increased exponentially).
             ssl_verify: Whether to verify SSL certificates (set False for self‑signed or tunnel endpoints).
+            max_items: Maximum number of news items to fetch (default: 10).
         """
         self.feed_url = feed_url
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.ssl_verify = ssl_verify
+        self.max_items = max_items
         self._http_client = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
@@ -53,12 +55,12 @@ class FeedClient:
             verify=self.ssl_verify,
         )
 
-    def fetch_match_results(self) -> list[MatchResult]:
+    def fetch_news(self) -> list[NewsItem]:
         """
-        Fetch and parse the RSS feed, returning a list of MatchResult objects.
+        Fetch and parse the RSS feed, returning a list of NewsItem objects.
 
         Returns:
-            List of MatchResult objects.
+            List of NewsItem objects (up to max_items).
 
         Raises:
             FeedClientError: If the feed cannot be fetched or parsed after all retries.
@@ -95,72 +97,60 @@ class FeedClient:
             f"Failed to fetch feed after {self.max_retries} attempts"
         ) from last_exception
 
-    def _parse_feed(self, raw_feed: str) -> list[MatchResult]:
+    def _parse_feed(self, raw_feed: str) -> list[NewsItem]:
         """
-        Parse the raw RSS feed into MatchResult objects.
+        Parse the raw RSS feed into NewsItem objects.
 
         Args:
             raw_feed: Raw XML content of the feed.
 
         Returns:
-            List of MatchResult objects. Items that cannot be parsed are silently skipped.
+            List of NewsItem objects (up to max_items).
         """
         parsed = feedparser.parse(raw_feed)
-        results = []
+        news_items = []
 
-        for entry in parsed.entries:
-            match_result = self._parse_entry(entry)
-            if match_result:
-                results.append(match_result)
+        for entry in parsed.entries[: self.max_items]:
+            news_item = self._parse_entry(entry)
+            if news_item:
+                news_items.append(news_item)
 
-        return results
+        return news_items
 
-    def _parse_entry(self, entry) -> MatchResult | None:
+    def _parse_entry(self, entry) -> NewsItem | None:
         """
-        Parse a single feed entry into a MatchResult.
+        Parse a single feed entry into a NewsItem.
 
         Args:
             entry: A feedparser entry object.
 
         Returns:
-            MatchResult if parsing succeeds, None otherwise.
+            NewsItem if parsing succeeds, None otherwise.
         """
-        # Extract title and publication date
+        # Extract title
         title = getattr(entry, "title", "")
-        pub_date = getattr(entry, "published_parsed", None)
-        if pub_date:
-            match_date = date(pub_date.tm_year, pub_date.tm_mon, pub_date.tm_mday)
-        else:
-            # Fallback to today if no date
-            match_date = date.today()
-
-        # Try to parse score from title using a simple regex
-        # Example: "FC Barcelona 3 - 1 Real Madrid"
-        pattern = r"([A-Za-z\s]+)\s+(\d+)\s*[-–]\s*(\d+)\s+([A-Za-z\s]+)"
-        match = re.search(pattern, title)
-        if not match:
+        if not title:
             return None
 
-        home_team = match.group(1).strip()
-        home_score = int(match.group(2))
-        away_score = int(match.group(3))
-        away_team = match.group(4).strip()
+        # Extract publication date
+        pub_date = getattr(entry, "published_parsed", None)
+        if pub_date:
+            published_date = date(pub_date.tm_year, pub_date.tm_mon, pub_date.tm_mday)
+        else:
+            # Fallback to today if no date
+            published_date = date.today()
 
-        # Determine competition from description or default
-        description = getattr(entry, "description", "")
-        competition = "La Liga"
-        if "Champions League" in description:
-            competition = "UEFA Champions League"
-        elif "Copa del Rey" in description:
-            competition = "Copa del Rey"
+        # Extract description (summary)
+        description = getattr(entry, "summary", "") or getattr(entry, "description", "")
 
-        return MatchResult(
-            home_team=home_team,
-            away_team=away_team,
-            home_score=home_score,
-            away_score=away_score,
-            match_date=match_date,
-            competition=competition,
+        # Extract link
+        link = getattr(entry, "link", "")
+
+        return NewsItem(
+            title=title,
+            published_date=published_date,
+            description=description,
+            link=link,
         )
 
     def close(self):

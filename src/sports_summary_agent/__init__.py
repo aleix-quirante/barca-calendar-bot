@@ -1,5 +1,5 @@
 """
-Sports Summary Agent – Módulo para generar resúmenes automáticos post‑partido.
+Sports Summary Agent – Módulo para generar análisis pre-partido (Previa).
 
 Utiliza la API OpenAI‑compatible (Ollama/LocalAI) configurada en `src.shared.config`.
 """
@@ -73,9 +73,13 @@ def get_openai_client():
     return _openai_client
 
 
-def create_agent(cache_enabled: bool = True):
+def create_agent(cache_enabled: bool = True, calendar_service=None):
     """
     Crea una instancia de SportsSummaryAgent configurada con los ajustes actuales.
+
+    Args:
+        cache_enabled: Habilitar caché de análisis.
+        calendar_service: Servicio de Google Calendar para buscar próximos partidos.
 
     Returns:
         SportsSummaryAgent: Agente listo para usar.
@@ -100,6 +104,7 @@ def create_agent(cache_enabled: bool = True):
         max_retries=3,
         retry_delay=1.0,
         ssl_verify=settings.ollama_ssl_verify,
+        max_items=10,
     )
 
     llm_client = LLMClient(
@@ -116,66 +121,49 @@ def create_agent(cache_enabled: bool = True):
     return SportsSummaryAgent(
         feed_client=feed_client,
         llm_client=llm_client,
+        calendar_service=calendar_service,
+        calendar_id=settings.google_calendar_id,
         cache_enabled=cache_enabled,
     )
 
 
-def generate_summary(
-    match_result: dict,
-    model: str | None = None,
-    temperature: float | None = None,
-    max_tokens: int | None = None,
-) -> str:
-    """
-    Genera un resumen de 3 bullet points para un partido dado.
-
-    Args:
-        match_result: Diccionario con los datos del partido (equipos, resultado, etc.)
-        model: Modelo a usar (por defecto settings.summary_model)
-        temperature: Temperatura de generación (por defecto settings.summary_temperature)
-        max_tokens: Máximo de tokens (por defecto settings.summary_max_tokens)
-
-    Returns:
-        str: Resumen formateado en markdown.
-
-    Raises:
-        RuntimeError: Si el módulo está desactivado o la API falla.
-    """
-    if not ENABLED:
-        raise RuntimeError("SportsSummaryAgent está desactivado.")
-
-    # Esta es una implementación de ejemplo que debe ser completada
-    # con la lógica real de llamada a la API.
-    # Por ahora devuelve un placeholder.
-    logger.warning(
-        "generate_summary no está implementado completamente; "
-        "devuelve un resumen de ejemplo."
-    )
-    return (
-        "⚽ **Resumen generado automáticamente**\n"
-        "• El Barça demostró un buen control del balón en la primera mitad.\n"
-        "• La defensa mantuvo la solidez ante los contraataques rivales.\n"
-        "• Con esta victoria, el equipo se afianza en la parte alta de la tabla."
-    )
-
-
-def update_event_with_summary(
-    calendar_service, event_id: str, summary_text: str
+def update_event_with_prematch_analysis(
+    calendar_service, event_id: str, analysis_text: str
 ) -> bool:
     """
-    Actualiza la descripción de un evento de Google Calendar con el resumen generado.
+    Actualiza la descripción de un evento de Google Calendar con el análisis pre-partido.
 
     Args:
         calendar_service: Servicio de Google Calendar autenticado.
         event_id: ID del evento a actualizar.
-        summary_text: Texto del resumen a insertar.
+        analysis_text: Texto del análisis a insertar.
 
     Returns:
         bool: True si la actualización fue exitosa.
     """
-    # Implementación pendiente (se integrará con google_calendar.py)
-    logger.warning("update_event_with_summary no implementado aún.")
-    return False
+    try:
+        event = (
+            calendar_service.events()
+            .get(calendarId=settings.google_calendar_id, eventId=event_id)
+            .execute()
+        )
+
+        current_description = event.get("description", "")
+
+        # Agregar la previa al inicio de la descripción
+        new_description = f"🔮 **PREVIA DEL PARTIDO**\n\n{analysis_text}\n\n---\n\n{current_description}"
+
+        event["description"] = new_description
+
+        calendar_service.events().update(
+            calendarId=settings.google_calendar_id, eventId=event_id, body=event
+        ).execute()
+
+        logger.info(f"Evento {event_id} actualizado con análisis pre-partido")
+        return True
+    except Exception as e:
+        logger.error(f"Error actualizando evento con análisis: {e}", exc_info=True)
+        return False
 
 
 # Exportar símbolos públicos
@@ -184,6 +172,5 @@ __all__ = [
     "ENABLED",
     "get_openai_client",
     "create_agent",
-    "generate_summary",
-    "update_event_with_summary",
+    "update_event_with_prematch_analysis",
 ]

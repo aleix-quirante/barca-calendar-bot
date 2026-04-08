@@ -301,17 +301,45 @@ def main():
         if eventos and servicio:
             sincronizar_eventos(servicio, eventos, probabilidades)
 
-        # 5. Generar resúmenes automáticos (si está activado)
+        # 5. Generar análisis pre-partido (si está activado)
         if settings.summary_enabled:
-            print("📰 Generando resúmenes automáticos de partidos...")
+            print("🔮 Generando análisis pre-partido del próximo partido...")
             try:
-                agent = create_agent(cache_enabled=True)
-                summaries = agent.run()
-                print(f"✅ Generados {len(summaries)} resúmenes nuevos.")
-                # Aquí podríamos actualizar eventos de Google Calendar con los resúmenes
-                # (pendiente de implementar)
+                from src.sports_summary_agent import (
+                    create_agent,
+                    update_event_with_prematch_analysis,
+                )
+
+                agent = create_agent(cache_enabled=True, calendar_service=servicio)
+                analyses = agent.run()
+
+                if analyses:
+                    print(
+                        f"✅ Generado análisis pre-partido para {len(analyses)} partido(s)."
+                    )
+                    # Actualizar el evento de Google Calendar con el análisis
+                    for analysis in analyses:
+                        # Formatear el análisis para la descripción del evento
+                        analysis_text = "\n".join(
+                            [f"• {point}" for point in analysis.analysis_points]
+                        )
+                        analysis_text += f"\n\n📋 {analysis.tactical_preview}"
+
+                        # Buscar el evento correspondiente
+                        # El match_id contiene la información del partido
+                        # Necesitamos encontrar el event_id del próximo partido
+                        # (esto ya se hace en el agente, pero necesitamos pasarlo)
+                        print(f"📝 Análisis generado para partido: {analysis.match_id}")
+                        print(analysis_text)
+                        # La actualización del evento se hará en una futura iteración
+                        # cuando tengamos el event_id disponible desde el agente
+                else:
+                    print("ℹ️  No se encontró próximo partido para generar análisis.")
             except Exception as e:
-                print(f"⚠️  Error generando resúmenes: {e}")
+                print(f"⚠️  Error generando análisis pre-partido: {e}")
+                import traceback
+
+                traceback.print_exc()
                 # No romper el flujo principal
 
     except Exception as e:
