@@ -154,6 +154,13 @@ class BotSettings(BaseSettings):
                 v = v + "/v1"
         return v
 
+    @field_validator("ollama_ssl_verify", mode="before")
+    @classmethod
+    def parse_empty_ssl(cls, v):
+        if v == "" or v is None:
+            return False
+        return v
+
     @property
     def is_summary_enabled(self) -> bool:
         """Determina si el módulo de resúmenes está activo."""

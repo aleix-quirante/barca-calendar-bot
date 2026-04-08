@@ -55,7 +55,7 @@ jobs:
       - name: Ejecutar script del Barça y Sincronizar Google Calendar
         env:
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
-          BARCA_OLLAMA_SSL_VERIFY: ${{ vars.BARCA_OLLAMA_SSL_VERIFY }}
+          BARCA_OLLAMA_SSL_VERIFY: ${{ vars.BARCA_OLLAMA_SSL_VERIFY || 'false' }}
         run: |
           set -e
           echo "Starting bot execution..."
