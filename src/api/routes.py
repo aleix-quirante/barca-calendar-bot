@@ -17,7 +17,6 @@ from src.calendar_cleaner.cleaner import create_cleaner
 from src.calendar_cleaner.models import CalendarCleanerConfig
 from src.shared.config import settings
 from src.sports_summary_agent import create_agent
-from src.sports_summary_agent import update_event_with_prematch_analysis
 
 router = APIRouter()
 
