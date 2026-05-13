@@ -178,6 +178,82 @@ def limpiar_eventos_viejos(servicio, calendar_id):
         print(f"Error al limpiar eventos viejos: {e}")
 
 
+def _merge_description(current_desc: str, probability: float | None) -> str:
+    """
+    Fusiona la descripción actual con la probabilidad de victoria.
+
+    Preserva cualquier bloque de previa (🔮 **PREVIA DEL PARTIDO**) al inicio
+    y actualiza/inserta la línea de probabilidad después del bloque de previa
+    pero antes del resto del contenido.
+
+    Args:
+        current_desc: Descripción actual del evento.
+        probability: Probabilidad de victoria (0-100) o None si no hay datos.
+
+    Returns:
+        Nueva descripción fusionada.
+    """
+    if not current_desc:
+        current_desc = ""
+
+    # Separar el bloque de previa si existe
+    previa_marker = "🔮 **PREVIA DEL PARTIDO**"
+    probability_marker = "📈 Probabilidad de victoria del Barça:"
+
+    # Buscar el marcador de previa
+    previa_index = current_desc.find(previa_marker)
+    has_previa = previa_index != -1
+
+    if has_previa:
+        # Encontrar el final del bloque de previa (buscar "---" después del marcador)
+        # Asumimos que el bloque de previa termina con "---" en una línea separada
+        rest_start = current_desc.find("\n---\n", previa_index)
+        if rest_start == -1:
+            # Si no hay separador claro, tomamos todo después del marcador como resto
+            previa_block = current_desc[previa_index:]
+            rest = ""
+        else:
+            previa_block = current_desc[previa_index:rest_start]
+            rest = current_desc[rest_start + 5 :]  # +5 para saltar "\n---\n"
+    else:
+        previa_block = ""
+        rest = current_desc
+
+    # Eliminar cualquier línea de probabilidad existente en el resto
+    # (para evitar duplicados)
+    lines = rest.split("\n")
+    filtered_lines = []
+    for line in lines:
+        if probability_marker not in line:
+            filtered_lines.append(line)
+    rest = "\n".join(filtered_lines).strip()
+
+    # Construir la nueva descripción
+    parts = []
+    if has_previa:
+        parts.append(previa_block)
+        parts.append("")  # línea vacía
+
+    # Añadir probabilidad si está disponible
+    if probability is not None:
+        parts.append(
+            f"📈 Probabilidad de victoria del Barça: {probability}% (según ClubElo)"
+        )
+
+    # Añadir el resto del contenido
+    if rest:
+        if parts:  # Si ya hay contenido, añadir separador
+            parts.append("---")
+            parts.append("")
+        parts.append(rest)
+
+    # Si no hay nada, mantener el texto base
+    if not parts:
+        parts.append("Sincronizado automáticamente (Barça Bot)")
+
+    return "\n".join(parts).strip()
+
+
 def sincronizar_eventos(servicio, eventos, probabilidades):
     """Sincroniza los eventos extraídos a Google Calendar"""
     calendar_id = "primary"  # O puedes poner el ID de un calendario específico
@@ -211,26 +287,10 @@ def sincronizar_eventos(servicio, eventos, probabilidades):
             )
             end_body = {"dateTime": end_iso} if "T" in end_iso else {"date": end_iso}
 
-            descripcion = "Sincronizado automáticamente (Barça Bot)"
-
-            if fecha_str in probabilidades:
-                prob = probabilidades[fecha_str]
-                descripcion += f"\n\n📈 Probabilidad de victoria del Barça: {prob}% (según ClubElo)"
-
-            evento_cuerpo = {
-                "summary": partido["summary"],
-                "location": partido["location"],
-                "description": descripcion,
-                "start": start_body,
-                "end": end_body,
-                "iCalUID": partido["uid"],
-                "sequence": int(
-                    datetime.now().timestamp() % 1000000
-                ),  # Forzar actualización
-                "updated": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                # Importante: para evitar duplicados si se actualiza
-                # Podemos usar la importación para sobreescribir usando iCalUID
-            }
+            # Obtener probabilidad para esta fecha
+            probability = (
+                probabilidades.get(fecha_str) if fecha_str in probabilidades else None
+            )
 
             # Usar 'list' con iCalUID para ver si ya existe y actualizar en lugar de solo importar
             busqueda = (
@@ -241,13 +301,29 @@ def sincronizar_eventos(servicio, eventos, probabilidades):
             existentes = busqueda.get("items", [])
 
             if existentes:
-                # Si existe, actualizamos el evento (especialmente la descripción con la probabilidad)
+                # Si existe, obtenemos la descripción actual para fusionar
                 event_id = existentes[0]["id"]
+                current_event = (
+                    servicio.events()
+                    .get(calendarId=calendar_id, eventId=event_id)
+                    .execute()
+                )
+                current_description = current_event.get("description", "") or ""
+
+                # Fusionar descripción preservando previa
+                new_description = _merge_description(current_description, probability)
+
                 print(f"Actualizando evento existente: {partido['summary']}")
-                # Crear una copia del cuerpo sin 'sequence' y 'updated' para evitar errores de secuencia
-                update_body = evento_cuerpo.copy()
-                update_body.pop("sequence", None)
-                update_body.pop("updated", None)
+
+                # Crear cuerpo de actualización
+                update_body = {
+                    "summary": partido["summary"],
+                    "location": partido["location"],
+                    "description": new_description,
+                    "start": start_body,
+                    "end": end_body,
+                }
+
                 try:
                     servicio.events().update(
                         calendarId=calendar_id, eventId=event_id, body=update_body
@@ -261,7 +337,23 @@ def sincronizar_eventos(servicio, eventos, probabilidades):
                         servicio.events().delete(
                             calendarId=calendar_id, eventId=event_id
                         ).execute()
-                        # Insertar nuevo evento
+                        # Para recrear, usamos descripción base con probabilidad
+                        base_desc = "Sincronizado automáticamente (Barça Bot)"
+                        if probability is not None:
+                            base_desc += f"\n\n📈 Probabilidad de victoria del Barça: {probability}% (según ClubElo)"
+
+                        evento_cuerpo = {
+                            "summary": partido["summary"],
+                            "location": partido["location"],
+                            "description": base_desc,
+                            "start": start_body,
+                            "end": end_body,
+                            "iCalUID": partido["uid"],
+                            "sequence": int(datetime.now().timestamp() % 1000000),
+                            "updated": datetime.now(UTC)
+                            .isoformat()
+                            .replace("+00:00", "Z"),
+                        }
                         servicio.events().insert(
                             calendarId=calendar_id, body=evento_cuerpo
                         ).execute()
@@ -269,8 +361,22 @@ def sincronizar_eventos(servicio, eventos, probabilidades):
                     else:
                         raise
             else:
-                # Si no existe, lo insertamos
+                # Si no existe, lo insertamos con descripción base
                 print(f"Insertando nuevo evento: {partido['summary']}")
+                base_desc = "Sincronizado automáticamente (Barça Bot)"
+                if probability is not None:
+                    base_desc += f"\n\n📈 Probabilidad de victoria del Barça: {probability}% (según ClubElo)"
+
+                evento_cuerpo = {
+                    "summary": partido["summary"],
+                    "location": partido["location"],
+                    "description": base_desc,
+                    "start": start_body,
+                    "end": end_body,
+                    "iCalUID": partido["uid"],
+                    "sequence": int(datetime.now().timestamp() % 1000000),
+                    "updated": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                }
                 servicio.events().insert(
                     calendarId=calendar_id, body=evento_cuerpo
                 ).execute()

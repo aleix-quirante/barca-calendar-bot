@@ -45,7 +45,7 @@ class LLMClient:
         Args:
             base_url: Base URL of the OpenAI‑compatible API (e.g., 'http://localhost:11434/v1').
             api_key: API key (can be a dummy for local inference).
-            model: Model name to use (e.g., 'qwen2.5:27b').
+            model: Model name to use (e.g., 'qwen3.5:9b').
             timeout: Request timeout in seconds.
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature (0.0–1.0).

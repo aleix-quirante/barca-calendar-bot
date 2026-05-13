@@ -68,8 +68,8 @@ class BotSettings(BaseSettings):
 
     # Ollama/LocalAI API (resúmenes automáticos - OpenAI‑compatible)
     ollama_base_url: str = Field(
-        default="http://100.76.240.84:11434/v1",
-        description="URL base para la API OpenAI‑compatible (Ollama/LocalAI). Ejemplo: 'http://100.76.240.84:11434/v1' para nodo local en M4 Pro. Gestionable vía .env como OLLAMA_BASE_URL.",
+        default="http://100.126.19.34:11434/v1",
+        description="URL base para la API OpenAI‑compatible (Ollama/LocalAI). Ejemplo: 'http://100.126.19.34:11434/v1' para nodo local en Mac Mini (Stay‑On Node). Gestionable vía .env como OLLAMA_BASE_URL.",
     )
     ollama_api_key: str = Field(
         default="ollama",
@@ -80,7 +80,7 @@ class BotSettings(BaseSettings):
         description="Verificar certificados SSL para la conexión a Ollama/LocalAI. Desactivar para túneles Cloudflare con certificados autofirmados.",
     )
     summary_model: str = Field(
-        default="qwen2.5:27b",
+        default="qwen3.5:9b",
         description="Modelo de lenguaje a utilizar para generación de resúmenes. Gestionable vía .env como OLLAMA_MODEL.",
     )
     summary_max_tokens: int = Field(
