@@ -50,10 +50,13 @@ class SportsSummaryAgent:
         self.cache_enabled = cache_enabled
         self._cache: dict[str, PreMatchAnalysis] = {}
 
-    def run(self) -> list[PreMatchAnalysis]:
+    def run(self, force: bool = False) -> list[PreMatchAnalysis]:
         """
         Run the agent: find next match, fetch news, generate pre-match analysis,
         and persist the analysis into the matching Google Calendar event.
+
+        Args:
+            force: If True, force update even if the event already contains a previa.
 
         Returns:
             List of PreMatchAnalysis objects (only newly generated ones).
@@ -106,6 +109,7 @@ class SportsSummaryAgent:
                     calendar_service=self.calendar_service,
                     event_id=upcoming_match.event_id,
                     analysis_text=analysis_text,
+                    force=force,
                 )
                 if persisted:
                     logger.info(

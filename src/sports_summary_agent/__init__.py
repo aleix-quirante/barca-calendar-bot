@@ -149,7 +149,7 @@ def has_prematch_analysis(description: str | None) -> bool:
 
 
 def update_event_with_prematch_analysis(
-    calendar_service, event_id: str, analysis_text: str
+    calendar_service, event_id: str, analysis_text: str, force: bool = False
 ) -> bool:
     """
     Actualiza la descripción de un evento de Google Calendar con el análisis pre-partido.
@@ -162,6 +162,7 @@ def update_event_with_prematch_analysis(
         calendar_service: Servicio de Google Calendar autenticado.
         event_id: ID del evento a actualizar.
         analysis_text: Texto del análisis a insertar.
+        force: Si True, ignora la detección de previa existente y fuerza la actualización.
 
     Returns:
         bool: True si la actualización fue exitosa (o ya estaba aplicada).
@@ -175,19 +176,34 @@ def update_event_with_prematch_analysis(
 
         current_description = event.get("description", "") or ""
 
-        # Idempotencia: si ya existe una previa, no la duplicamos.
-        if has_prematch_analysis(current_description):
+        # Idempotencia: si ya existe una previa, no la duplicamos (a menos que force=True).
+        if not force and has_prematch_analysis(current_description):
             logger.info(
                 "Evento %s ya contiene una previa; se omite la actualización.",
                 event_id,
             )
             return True
 
+        # Validar que el análisis no esté vacío
+        if not analysis_text or analysis_text.strip() == "":
+            logger.warning(
+                "El texto del análisis está vacío para el evento %s; no se actualiza.",
+                event_id,
+            )
+            return False
+
         # Anteponer la previa al inicio de la descripción, preservando
         # la información existente (probabilidad de victoria, etc.).
         new_description = (
             f"{PREVIA_MARKER}\n\n{analysis_text}\n\n---\n\n{current_description}"
         ).rstrip()
+
+        # Log para depuración: mostrar los primeros 200 caracteres de la nueva descripción
+        logger.debug(
+            "Actualizando evento %s con nueva descripción (primeros 200 chars): %s",
+            event_id,
+            new_description[:200],
+        )
 
         event["description"] = new_description
 
