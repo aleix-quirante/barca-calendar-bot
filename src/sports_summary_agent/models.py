@@ -3,7 +3,7 @@ Data models for the SportsSummaryAgent module.
 """
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -72,3 +72,21 @@ class PreMatchAnalysis(BaseModel):
         if len(v) != 3:
             raise ValueError("Must have exactly three analysis points")
         return v
+
+
+class PreMatchContext(BaseModel):
+    """Deterministic context for pre-match analysis injection."""
+
+    rival_name: str = Field(description="Nombre del rival (equipo contrario)")
+    is_home: bool = Field(description="Condición de local (True) o visitante (False)")
+    clubelo_probability: Optional[float] = Field(
+        default=None,
+        description="Probabilidad de victoria del Barça según ClubElo (porcentaje 0-100).",
+        ge=0.0,
+        le=100.0,
+    )
+
+    @property
+    def venue_condition(self) -> str:
+        """Return 'local' or 'visitante' in Spanish."""
+        return "local" if self.is_home else "visitante"

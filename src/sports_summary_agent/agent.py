@@ -7,7 +7,11 @@ from datetime import datetime, timedelta, UTC
 
 from src.sports_summary_agent.feed_client import FeedClient, FeedClientError
 from src.sports_summary_agent.llm_client import LLMClient, LLMClientError
-from src.sports_summary_agent.models import PreMatchAnalysis, UpcomingMatch
+from src.sports_summary_agent.models import (
+    PreMatchAnalysis,
+    UpcomingMatch,
+    PreMatchContext,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +88,13 @@ class SportsSummaryAgent:
             logger.debug("Analysis for match %s already cached, skipping", match_id)
             return []
 
+        # Build deterministic context
+        context = self._build_prematch_context(upcoming_match)
+
         # Generate pre-match analysis
         try:
             analysis = self.llm_client.generate_prematch_analysis(
-                upcoming_match, news_items
+                upcoming_match, news_items, context
             )
         except LLMClientError:
             logger.error("Failed to generate pre-match analysis", exc_info=True)
@@ -160,6 +167,48 @@ class SportsSummaryAgent:
         )
         tactical = analysis.tactical_preview.strip()
         return f"{bullet_points}\n\n🎯 Previa táctica: {tactical}"
+
+    def _build_prematch_context(self, upcoming_match: UpcomingMatch) -> PreMatchContext:
+        """
+        Build deterministic context for pre-match analysis.
+
+        Determines rival name, home/away condition, and ClubElo probability (if available).
+        Gracefully handles missing ClubElo data.
+        """
+        # Determine if Barça is home or away
+        barca_keywords = ["barcelona", "barça", "fc barcelona"]
+        home_lower = upcoming_match.home_team.lower()
+        away_lower = upcoming_match.away_team.lower()
+        is_barca_home = any(kw in home_lower for kw in barca_keywords)
+        is_barca_away = any(kw in away_lower for kw in barca_keywords)
+
+        if is_barca_home and is_barca_away:
+            # Ambiguous, default to home
+            is_barca_home = True
+            is_barca_away = False
+
+        rival_name = (
+            upcoming_match.away_team if is_barca_home else upcoming_match.home_team
+        )
+        is_home = is_barca_home
+
+        # Try to fetch ClubElo probability
+        clubelo_prob = None
+        try:
+            from src.win_probability_fix.clubelo_client import ClubEloClient
+
+            client = ClubEloClient()
+            probabilities = client.get_probabilities()
+            match_date_str = upcoming_match.match_date.date().isoformat()
+            clubelo_prob = probabilities.get(match_date_str)
+        except Exception as e:
+            logger.debug("Could not fetch ClubElo probability: %s", e)
+
+        return PreMatchContext(
+            rival_name=rival_name,
+            is_home=is_home,
+            clubelo_probability=clubelo_prob,
+        )
 
     def _find_next_match(self) -> UpcomingMatch | None:
         """
