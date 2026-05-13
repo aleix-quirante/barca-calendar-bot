@@ -302,18 +302,22 @@ async def sync_calendar():
         # 4. Sincronizar
         if eventos and servicio:
             sincronizar_eventos(servicio, eventos, probabilidades)
-        # 5. Generar análisis pre-partido (si está activado)
-        if settings.summary_enabled:
+        # 5. Generar análisis pre-partido (si está activado).
+        # El agente persiste el análisis directamente en el evento del calendario.
+        if settings.is_summary_enabled and servicio:
             print("🔮 Generando análisis pre-partido del próximo partido...")
             try:
                 agent = create_agent(cache_enabled=True, calendar_service=servicio)
                 analyses = agent.run()
                 if analyses:
                     print(
-                        f"✅ Generado análisis pre-partido para {len(analyses)} partido(s)."
+                        f"✅ Generado y persistido análisis pre-partido para "
+                        f"{len(analyses)} partido(s)."
                     )
                 else:
-                    print("ℹ️  No se encontró próximo partido para generar análisis.")
+                    print(
+                        "ℹ️  No se encontró próximo partido sin previa para generar análisis."
+                    )
             except Exception as e:
                 print(f"⚠️  Error generando análisis pre-partido: {e}")
         # 6. Actualizar log (mantiene el verde)

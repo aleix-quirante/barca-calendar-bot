@@ -127,11 +127,36 @@ def create_agent(cache_enabled: bool = True, calendar_service=None):
     )
 
 
+# Marcador estable para detectar eventos que ya tienen previa.
+# Se utiliza tanto al insertar como al filtrar duplicados, garantizando
+# que la detección sea robusta ante cambios en el texto del análisis.
+PREVIA_MARKER = "🔮 **PREVIA DEL PARTIDO**"
+
+
+def has_prematch_analysis(description: str | None) -> bool:
+    """
+    Determina si una descripción de evento ya contiene una previa generada.
+
+    Args:
+        description: Texto de la descripción del evento.
+
+    Returns:
+        True si la descripción contiene el marcador de previa.
+    """
+    if not description:
+        return False
+    return PREVIA_MARKER in description
+
+
 def update_event_with_prematch_analysis(
     calendar_service, event_id: str, analysis_text: str
 ) -> bool:
     """
     Actualiza la descripción de un evento de Google Calendar con el análisis pre-partido.
+
+    Preserva la descripción existente (incluyendo la línea de probabilidad de
+    victoria del Barça) y antepone el bloque de previa con marcador estable.
+    Es idempotente: si la descripción ya contiene una previa, no la duplica.
 
     Args:
         calendar_service: Servicio de Google Calendar autenticado.
@@ -139,7 +164,7 @@ def update_event_with_prematch_analysis(
         analysis_text: Texto del análisis a insertar.
 
     Returns:
-        bool: True si la actualización fue exitosa.
+        bool: True si la actualización fue exitosa (o ya estaba aplicada).
     """
     try:
         event = (
@@ -148,10 +173,21 @@ def update_event_with_prematch_analysis(
             .execute()
         )
 
-        current_description = event.get("description", "")
+        current_description = event.get("description", "") or ""
 
-        # Agregar la previa al inicio de la descripción
-        new_description = f"🔮 **PREVIA DEL PARTIDO**\n\n{analysis_text}\n\n---\n\n{current_description}"
+        # Idempotencia: si ya existe una previa, no la duplicamos.
+        if has_prematch_analysis(current_description):
+            logger.info(
+                "Evento %s ya contiene una previa; se omite la actualización.",
+                event_id,
+            )
+            return True
+
+        # Anteponer la previa al inicio de la descripción, preservando
+        # la información existente (probabilidad de victoria, etc.).
+        new_description = (
+            f"{PREVIA_MARKER}\n\n{analysis_text}\n\n---\n\n{current_description}"
+        ).rstrip()
 
         event["description"] = new_description
 
@@ -159,7 +195,7 @@ def update_event_with_prematch_analysis(
             calendarId=settings.google_calendar_id, eventId=event_id, body=event
         ).execute()
 
-        logger.info(f"Evento {event_id} actualizado con análisis pre-partido")
+        logger.info("Evento %s actualizado con análisis pre-partido", event_id)
         return True
     except Exception as e:
         logger.error(f"Error actualizando evento con análisis: {e}", exc_info=True)
@@ -170,7 +206,9 @@ def update_event_with_prematch_analysis(
 __all__ = [
     "config",
     "ENABLED",
+    "PREVIA_MARKER",
     "get_openai_client",
     "create_agent",
+    "has_prematch_analysis",
     "update_event_with_prematch_analysis",
 ]

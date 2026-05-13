@@ -52,7 +52,8 @@ class SportsSummaryAgent:
 
     def run(self) -> list[PreMatchAnalysis]:
         """
-        Run the agent: find next match, fetch news, generate pre-match analysis.
+        Run the agent: find next match, fetch news, generate pre-match analysis,
+        and persist the analysis into the matching Google Calendar event.
 
         Returns:
             List of PreMatchAnalysis objects (only newly generated ones).
@@ -89,15 +90,77 @@ class SportsSummaryAgent:
             logger.error("Failed to generate pre-match analysis", exc_info=True)
             return []
 
+        # Persist analysis to the calendar event (idempotente: el helper
+        # detecta el marcador y evita duplicados). Si el servicio de
+        # calendario no está disponible, omitimos la persistencia pero
+        # devolvemos el análisis igualmente.
+        if self.calendar_service and upcoming_match.event_id:
+            try:
+                # Import perezoso para evitar dependencias circulares
+                from src.sports_summary_agent import (
+                    update_event_with_prematch_analysis,
+                )
+
+                analysis_text = self._format_analysis_text(analysis)
+                persisted = update_event_with_prematch_analysis(
+                    calendar_service=self.calendar_service,
+                    event_id=upcoming_match.event_id,
+                    analysis_text=analysis_text,
+                )
+                if persisted:
+                    logger.info(
+                        "Análisis pre-partido persistido en evento %s",
+                        upcoming_match.event_id,
+                    )
+                else:
+                    logger.warning(
+                        "No se pudo persistir el análisis para el evento %s",
+                        upcoming_match.event_id,
+                    )
+            except Exception:
+                logger.error(
+                    "Error inesperado persistiendo el análisis pre-partido",
+                    exc_info=True,
+                )
+        else:
+            logger.warning(
+                "No hay calendar_service o event_id; el análisis no se persistirá."
+            )
+
         if self.cache_enabled:
             self._cache[match_id] = analysis
 
         logger.info("Generated pre-match analysis for %s", match_id)
         return [analysis]
 
+    @staticmethod
+    def _format_analysis_text(analysis: PreMatchAnalysis) -> str:
+        """
+        Formatea un PreMatchAnalysis a texto plano para insertar en el evento.
+
+        Estructura:
+            • Punto 1
+            • Punto 2
+            • Punto 3
+
+            🎯 Previa táctica: <tactical_preview>
+
+        Args:
+            analysis: Objeto PreMatchAnalysis ya validado.
+
+        Returns:
+            Texto formateado listo para insertar en la descripción del evento.
+        """
+        bullet_points = "\n".join(
+            f"• {point.strip()}" for point in analysis.analysis_points
+        )
+        tactical = analysis.tactical_preview.strip()
+        return f"{bullet_points}\n\n🎯 Previa táctica: {tactical}"
+
     def _find_next_match(self) -> UpcomingMatch | None:
         """
-        Find the next upcoming match in the calendar (within 7 days) that doesn't have 'Previa' in description.
+        Find the next upcoming match in the calendar (within 7 days) that
+        doesn't already contain a generated previa (detected via stable marker).
 
         Returns:
             UpcomingMatch object or None if no match found.
@@ -109,6 +172,9 @@ class SportsSummaryAgent:
             return None
 
         try:
+            # Import perezoso para evitar dependencias circulares
+            from src.sports_summary_agent import has_prematch_analysis
+
             now = datetime.now(UTC)
             time_max = now + timedelta(days=7)
 
@@ -128,9 +194,9 @@ class SportsSummaryAgent:
             events = events_result.get("items", [])
 
             for event in events:
-                # Skip events that already have "Previa" in description
-                description = event.get("description", "")
-                if "Previa" in description or "previa" in description:
+                # Saltar eventos que ya tienen una previa (marcador estable)
+                description = event.get("description", "") or ""
+                if has_prematch_analysis(description):
                     continue
 
                 # Parse event details
